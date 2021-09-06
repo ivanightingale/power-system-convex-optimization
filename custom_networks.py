@@ -1,8 +1,22 @@
 import pandapower as pp
+import pandapower.networks as pn
+
+
+def get_case(case_name, case_type, is_custom):
+    if is_custom:
+        return globals()[case_name](case_type)
+    else:
+        if case_type != 0:
+            raise AttributeError("case_type should be 0 for MATPOWER cases")
+        net = getattr(pn, case_name)()
+        # currently the sn_mva (base power) is inconsistent with that in the original MATPOWER cases
+        # TODO: some cases have sn_mva = 10. See https://github.com/e2nIEE/pandapower/issues/1312
+        net.sn_mva = 100
+        return net
 
 
 # 2-bus simple case
-def ccase2():
+def ccase2(case_type=0):
     net = pp.create_empty_network(sn_mva=1)
 
     # buses
@@ -52,7 +66,7 @@ def ccase3_radial(case_type=0):
 
 
 def ccase3(case_type=0):
-    net = case3radial(case_type)
+    net = ccase3_radial(case_type)
     pp.create_line_from_parameters(net, 1, 2, length_km=1, r_ohm_per_km=1, x_ohm_per_km=1, c_nf_per_km=0, max_i_ka=0, index=2)
 
     return net
