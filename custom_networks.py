@@ -2,12 +2,11 @@ import pandapower as pp
 import pandapower.networks as pn
 
 
-def get_case(case_name, case_type, is_custom):
-    if is_custom:
+def get_case(case_name, case_type=None):
+    # case type is specified only for custom cases
+    if case_type is not None:
         return globals()[case_name](case_type)
     else:
-        if case_type != 0:
-            raise AttributeError("case_type should be 0 for MATPOWER cases")
         net = getattr(pn, case_name)()
         # currently the sn_mva (base power) is inconsistent with that in the original MATPOWER cases
         # TODO: some cases have sn_mva = 10. See https://github.com/e2nIEE/pandapower/issues/1312

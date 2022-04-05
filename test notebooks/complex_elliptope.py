@@ -24,7 +24,7 @@ class ComplexElliptope(Manifold, RetrAsExpMixin):
             f"Quotient manifold of {n}x{n} complex psd matrices of rank {k} "
             "with unit diagonal elements"
         )
-        dimension = int(n * (k - 1) - k * (k - 1) / 2)
+        dimension = int(n * (k - 1) - k * (k - 1) / 2) # FIXME
         super().__init__(name, dimension)
 
     @property
@@ -49,9 +49,10 @@ class ComplexElliptope(Manifold, RetrAsExpMixin):
 
         # project onto the horizontal space at Y
         YtY = Y.conj().T @ Y
-        AS = Y.conj().T @ eta - eta.conj().T @ Y
+        AS = Y.conj().T @ H - H.conj().T @ Y
         # find skew-Hermitian matrix Omega which solves the Sylvester equation
-        Omega = lyap(YtY, AS)
+        Omega = lyap(YtY, AS)  # seems to be always skew-Hermitian?
+        # Omega = la.inv(Y.conj().T @ Y) @ Y.conj().T @ eta
         return eta - Y @ (Omega - Omega.conj().T) / 2
 
     # retraction of vector U at Y
@@ -77,6 +78,7 @@ class ComplexElliptope(Manifold, RetrAsExpMixin):
 
     # a random point on the manifold
     def rand(self):
+        # return self._normalize_rows(rnd.randn(self._n, self._k))  # for testing
         return self._normalize_rows(rnd.randn(self._n, self._k) + rnd.randn(self._n, self._k) * 1j)
 
     # a random vector in the horizontal space at Y
