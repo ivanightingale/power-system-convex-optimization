@@ -1,5 +1,6 @@
 import numpy as np
 import cvxpy as cp
+import networkx as nx
 
 
 # decompose a positive semidefinite matrix X = YY*
@@ -79,7 +80,7 @@ def complex_hyperplane_rounding(Y, cost, min_r=1, max_r=1, iter=100):
 
 # approximately reduce rank of X = YY* by delta_rank via eigenprojection and row normalization
 # if can't be reduced anymore, return the original Y
-def eigen_proj(Y, delta_rank, is_complex):
+def eigen_proj(Y, is_complex, delta_rank=1):
     X = Y @ Y.conj().T
     current_rank = np.linalg.matrix_rank(X, tol=1e-9)
     target_rank = current_rank - delta_rank
@@ -102,30 +103,47 @@ def eigen_proj(Y, delta_rank, is_complex):
 
 
 # perform fixed point iteration on cvxpy variable X, where X is the optimal solution of prob
-def fixed_point_iteration(prob, X, is_complex):
+def fixed_point_iteration(prob, X, shift, is_complex):
+    n = X.shape[0]
     if is_complex:
-        X_val = cp.Parameter((X.shape[0], X.shape[1]), hermitian=True, value=X.value)
-        iteration_obj = cp.real(cp.trace(X @ X_val))
+        prev_X = cp.Parameter((n, n), hermitian=True, value=X.value)
+        iteration_obj = cp.real(cp.trace(X @ (prev_X + shift)))
     else:
-        X_val = cp.Parameter((X.shape[0], X.shape[1]), symmetric=True, value=X.value)
-        iteration_obj = cp.trace(X @ X_val)
+        prev_X = cp.Parameter((n, n), symmetric=True, value=X.value)
+        iteration_obj = cp.trace(X @ (prev_X + shift))
+
 
     def mat_rank(X):
         return np.linalg.matrix_rank(X, tol=1e-9)
 
-    prev_X_val = X.value
     iteration_prob = cp.Problem(cp.Maximize(iteration_obj), prob.constraints)
     terminate = False
-    print("Initial rank: ", mat_rank(X.value))
     print("Initial objective: ", prob.objective.value)
+    print("Initial rank: ", mat_rank(X.value))
     while not terminate:
         iteration_prob.solve()
-        print("Current objective: ", prob.objective.value)
-        print("Current rank: ", mat_rank(X.value))
-        X_val.value = X.value
-        terminate = np.linalg.norm(X.value - prev_X_val) < 1e-6
-        prev_X_val = X.value
-    print("Fixed point rank: ", mat_rank(X.value))
+        if np.linalg.norm(X.value - prev_X.value) < 1e-6:
+            terminate = True
+        else:
+            print("Current objective: ", prob.objective.value)
+            print("Current rank: ", mat_rank(X.value))
+            prev_X.value = X.value
     print("Fixed point objective: ", prob.objective.value)
+    print("Fixed point rank: ", mat_rank(X.value))
     print("Fixed point eigenvalues:")
     print(np.linalg.eigvalsh(X.value))
+
+
+# load a graph as a networkx Graph
+def load_graph(graph_file, n):
+    data_path = "../dat/"
+
+    with open(data_path + graph_file) as inf:
+        next(inf, '')   # skip first line
+        G = nx.read_weighted_edgelist(inf, nodetype=int, encoding="utf-8")
+
+    first_vertex = np.floor(np.random.default_rng().random() * (len(G) - n - 1)).astype(int)
+    G = G.subgraph(range(first_vertex, first_vertex + n))
+    assert len(G) == n
+    nx.draw(G)
+    return G
