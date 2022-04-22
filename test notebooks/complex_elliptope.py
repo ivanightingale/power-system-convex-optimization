@@ -35,7 +35,7 @@ class ComplexElliptope(Manifold, RetrAsExpMixin):
 
     # inner product of tangent vectors U and V at Y
     def inner(self, Y, U, V):
-        return np.tensordot(U.conj(), V)  # FIXME: why is only the real part used in complex_circle and complex_grassmann?
+        return np.tensordot(U.conj(), V, axes=U.ndim)  # FIXME: why is only the real part used in complex_circle and complex_grassmann?
 
     # norm of tangent vector U at Y
     def norm(self, Y, U):

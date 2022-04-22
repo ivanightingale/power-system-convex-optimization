@@ -4,10 +4,10 @@ import networkx as nx
 
 
 # decompose a positive semidefinite matrix X = YY*
-def decompose_psd(X):
+def decompose_psd(X, eig_tol=1e-9):
     n = X.shape[0]
     eigen_values, eigen_vectors = np.linalg.eigh(X)
-    non_neg_eig_idx = [i for i in range(n) if eigen_values[i] >= 0]
+    non_neg_eig_idx = [i for i in range(n) if eigen_values[i] >= eig_tol]
     return eigen_vectors[:, non_neg_eig_idx] @ np.diag(np.sqrt(eigen_values[non_neg_eig_idx]))
 
 
@@ -16,23 +16,7 @@ def normalize_rows(X):
     return X / np.linalg.norm(X, axis=1)[:, np.newaxis]
 
 
-# round each row of Y to 1 or -1
-def hyperplane_rounding(Y, cost, iter=100):
-    min_cost = np.Inf
-    best_x = None
-    d = Y.shape[1]
-    rng = np.random.default_rng()
-    for i in range(iter):
-        r = rng.standard_normal((d, 1))
-        x = np.sign(Y @ r)
-        cost_val = cost(x)
-        if cost_val < min_cost:
-            min_cost = cost_val
-            best_x = x
-    return min_cost, best_x
-
-
-# project each entry of complex vector v into the annulus with inner radius min_r and outer radius max_r centered at 0
+# project each entry of vector v into the annulus with inner radius min_r and outer radius max_r centered at 0
 def proj_to_annulus(v, min_r, max_r):
     # find the closest point of each entry in the ring
     n = v.shape[0]
@@ -56,13 +40,36 @@ def proj_to_annulus(v, min_r, max_r):
     return np.array(x)
 
 
-# round each row of Y to a complex number of unit modulus
-def complex_hyperplane_rounding(Y, cost, min_r=1, max_r=1, iter=100):
+# round each row of Y to 1 or -1
+def hyperplane_rounding(Y, cost, min_r=1, max_r=1, n_iter=100):
     min_cost = np.Inf
     best_x = None
     d = Y.shape[1]
     rng = np.random.default_rng()
-    for i in range(iter):
+    for i in range(n_iter):
+        r = rng.standard_normal((d, 1))
+        if np.isscalar(min_r) and np.isscalar(max_r):
+            if min_r == 1 and max_r == 1:
+                x = np.sign(Y @ r)
+            else:
+                x = proj_to_annulus(Y @ r, min_r, max_r)
+        else:
+            x = proj_to_annulus(Y @ r, min_r, max_r)
+
+        cost_val = cost(x)
+        if cost_val < min_cost:
+            min_cost = cost_val
+            best_x = x
+    return min_cost, best_x
+
+
+# round each row of Y to a complex number of unit modulus
+def complex_hyperplane_rounding(Y, cost, min_r=1, max_r=1, n_iter=100):
+    min_cost = np.Inf
+    best_x = None
+    d = Y.shape[1]
+    rng = np.random.default_rng()
+    for i in range(n_iter):
         r = 1 / np.sqrt(2) * rng.standard_normal((d, 1)) + 1 / np.sqrt(2) * rng.standard_normal((d, 1)) * 1j
         if np.isscalar(min_r) and np.isscalar(max_r):
             if min_r == 1 and max_r == 1:
