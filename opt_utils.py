@@ -88,7 +88,7 @@ def complex_hyperplane_rounding(Y, cost, min_r=1, max_r=1, n_iter=100):
 # approximately reduce rank of X = YY* by delta_rank via eigenprojection and row normalization
 # if can't be reduced anymore, return the original Y
 def eigen_proj(Y, is_complex, delta_rank=1):
-    X = Y @ Y.conj().T
+    X = np.outer(Y, Y.conj())
     current_rank = np.linalg.matrix_rank(X, tol=1e-9)
     target_rank = current_rank - delta_rank
     Y_proj = Y
