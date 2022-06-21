@@ -84,22 +84,3 @@ def check_power_feasibility(v, p_min, p_max, q_min, q_max, n_gen, p_d, q_d, G, B
             print("reactive power generation %d is too low: q_g = %f < %f" % (i, q_g[i], q_min[i]))
         elif q_g[i] > q_max[i]:
             print("reactive power generation %d is too high: q_g = %f > %f" % (i, q_g[i], q_max[i]))
-
-
-# check whether the generation constratins are satisfied by a given solution (v, p_g, q_g)
-def verify_feasibility(X, p_g, q_g, p_d, q_d, gen_df, G, B, graph):
-    n = X.shape[0]
-    for i in range(n):
-        gen_list = gen_df.loc[gen_df["bus"] == i].index.to_numpy()
-
-        active_lhs = np.sum([p_g[k] for k in gen_list]) - p_d[i]
-        active_rhs = G[i][i] * X[i][i] + np.sum(
-            [G[i][j] * np.real(X[i][j]) + B[i][j] * np.imag(X[i][j]) for j in graph.neighbors(i)])
-        if np.abs(np.real(active_lhs - active_rhs)) > 1e-6:
-            print("active %d is violated" % (i))
-
-        reactive_lhs = np.sum([q_g[k] for k in gen_list]) - q_d[i]
-        reactive_rhs = -B[i][i] * X[i][i] + np.sum(
-            [-B[i][j] * np.real(X[i][j]) + G[i][j] * np.imag(X[i][j]) for j in graph.neighbors(i)])
-        if np.abs(np.real(active_lhs - active_rhs)) > 1e-6:
-            print("reactive %d is violated" % (i))
