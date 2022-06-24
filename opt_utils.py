@@ -16,6 +16,12 @@ def normalize_rows(X):
     return X / np.linalg.norm(X, axis=1)[:, np.newaxis]
 
 
+def print_rank_data(X, tol=1e-9):
+    print("The eigenvalues are")
+    print(np.linalg.eigvalsh(X))
+    print("Rank of matrix is %s with tolerance %s." % (np.linalg.matrix_rank(X, tol, hermitian=True), tol))
+
+
 # project each entry of vector v into the annulus with inner radius min_r and outer radius max_r centered at 0
 def proj_to_annulus(v, min_r, max_r):
     # find the closest point of each entry in the ring
@@ -119,9 +125,8 @@ def fixed_point_iteration(prob, X, shift, is_complex):
         prev_X = cp.Parameter((n, n), symmetric=True, value=X.value)
         iteration_obj = cp.trace(X @ (prev_X + shift))
 
-
     def mat_rank(X):
-        return np.linalg.matrix_rank(X, tol=1e-9)
+        return np.linalg.matrix_rank(X, tol=1e-9, hermitian=True)
 
     iteration_prob = cp.Problem(cp.Maximize(iteration_obj), prob.constraints)
     terminate = False
@@ -146,7 +151,7 @@ def load_graph(graph_file, n):
     data_path = "../dat/"
 
     with open(data_path + graph_file) as inf:
-        next(inf, '')   # skip first line
+        next(inf, '')  # skip first line
         G = nx.read_weighted_edgelist(inf, nodetype=int, encoding="utf-8")
 
     first_vertex = np.floor(np.random.default_rng().random() * (len(G) - n - 1)).astype(int)
@@ -154,3 +159,37 @@ def load_graph(graph_file, n):
     assert len(G) == n
     nx.draw(G)
     return G
+
+
+def build_enriched_supergraph(G, treewidth_algorithm_idx=0):
+    # use the chosen algorithm to compute the approximate minimal tree decomposition
+    treewidth_algorithms_list = [nx.algorithms.approximation.treewidth_min_degree,
+                                 nx.algorithms.approximation.treewidth_min_fill_in]  # nx.junction_tree
+    treewidth, tree_decomp = treewidth_algorithms_list[treewidth_algorithm_idx](G)
+    print("Treewidth: %s" % treewidth)
+
+    G_bar = G.copy()
+    next_idx = G_bar.number_of_nodes()  # keep track of index of the next redundant vertex to be added
+    T_bar = tree_decomp.copy()
+
+    # add redundant vertices
+    for bag in tree_decomp.nodes:
+        if len(bag) < treewidth + 1:
+            new_bag = bag.union(frozenset(range(next_idx, next_idx + treewidth + 1 - len(bag))))
+            T_bar = nx.relabel_nodes(T_bar, {bag: new_bag})
+            next_idx += treewidth + 1 - len(bag)
+    G_bar.add_nodes_from(range(G_bar.number_of_nodes(), next_idx))
+
+    # iterate through leaves of T_tilde and add edges
+    T_tilde = T_bar.copy()
+    while T_tilde.number_of_nodes() > 1:
+        for bag in T_tilde.nodes:
+            if T_tilde.degree(bag) == 1:  # the current bag is a leaf
+                parent = list(T_tilde.neighbors(bag))[0]
+                Os = sorted(list(bag.difference(parent)))
+                Ws = sorted(list(parent.difference(bag)))
+                G_bar.add_edges_from([(Os[i], Ws[i]) for i in range(len(Os))])
+                T_tilde.remove_node(bag)
+                break
+
+    return G_bar
