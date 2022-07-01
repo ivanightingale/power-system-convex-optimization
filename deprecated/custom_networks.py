@@ -8,9 +8,6 @@ def get_case(case_name, case_type=None):
         return globals()[case_name](case_type)
     else:
         net = getattr(pn, case_name)()
-        # currently the sn_mva (base power) is inconsistent with that in the original MATPOWER cases
-        # TODO: some cases have sn_mva = 10. See https://github.com/e2nIEE/pandapower/issues/1312
-        net.sn_mva = 100
         return net
 
 

@@ -16,12 +16,6 @@ def normalize_rows(X):
     return X / np.linalg.norm(X, axis=1)[:, np.newaxis]
 
 
-def print_rank_data(X, tol=1e-9):
-    print("The eigenvalues are")
-    print(np.linalg.eigvalsh(X))
-    print("Rank of matrix is %s with tolerance %s." % (np.linalg.matrix_rank(X, tol, hermitian=True), tol))
-
-
 # project each entry of vector v into the annulus with inner radius min_r and outer radius max_r centered at 0
 def proj_to_annulus(v, min_r, max_r):
     # find the closest point of each entry in the ring
@@ -46,7 +40,7 @@ def proj_to_annulus(v, min_r, max_r):
     return np.array(x)
 
 
-# round each row of Y to 1 or -1
+# round each row of Y to 1 or -1, or project onto the annulus between min_r and max_r
 def hyperplane_rounding(Y, cost, min_r=1, max_r=1, n_iter=100):
     min_cost = np.Inf
     best_x = None
@@ -93,7 +87,7 @@ def complex_hyperplane_rounding(Y, cost, min_r=1, max_r=1, n_iter=100):
 
 # approximately reduce rank of X = YY* by delta_rank via eigenprojection and row normalization
 # if can't be reduced anymore, return the original Y
-def eigen_proj(Y, is_complex, delta_rank=1):
+def elliptope_eigen_proj(Y, is_complex, delta_rank=1):
     X = np.outer(Y, Y.conj())
     current_rank = np.linalg.matrix_rank(X, tol=1e-9)
     target_rank = current_rank - delta_rank
@@ -116,7 +110,7 @@ def eigen_proj(Y, is_complex, delta_rank=1):
 
 
 # perform fixed point iteration on cvxpy variable X, where X is the optimal solution of prob
-def fixed_point_iteration(prob, X, shift, is_complex):
+def fixed_point_iteration(prob, X, shift, is_complex, verbose=False, solver=cp.MOSEK):
     n = X.shape[0]
     if is_complex:
         prev_X = cp.Parameter((n, n), hermitian=True, value=X.value)
@@ -125,39 +119,50 @@ def fixed_point_iteration(prob, X, shift, is_complex):
         prev_X = cp.Parameter((n, n), symmetric=True, value=X.value)
         iteration_obj = cp.trace(X @ (prev_X + shift))
 
-    def mat_rank(X):
-        return np.linalg.matrix_rank(X, tol=1e-9, hermitian=True)
+    def print_iteration_info(phase_keyword, prob, X, verbose=True):
+        print("%s objective: %f" % (phase_keyword, prob.objective.value))
+        if verbose:
+            print("%s eigenvalues:" % (phase_keyword))
+            print(np.linalg.eigvalsh(X.value))
 
     iteration_prob = cp.Problem(cp.Maximize(iteration_obj), prob.constraints)
     terminate = False
-    print("Initial objective: ", prob.objective.value)
-    print("Initial rank: ", mat_rank(X.value))
+    n_iter = 0
+    print_iteration_info("initial", prob, X)
     while not terminate:
-        iteration_prob.solve()
-        if np.linalg.norm(X.value - prev_X.value) < 1e-6:
+        iteration_prob.solve(solver=solver)
+        if np.linalg.norm(X.value - prev_X.value) < 1e-3:
             terminate = True
         else:
-            print("Current objective: ", prob.objective.value)
-            print("Current rank: ", mat_rank(X.value))
+            print_iteration_info("current", prob, X, verbose)
             prev_X.value = X.value
-    print("Fixed point objective: ", prob.objective.value)
-    print("Fixed point rank: ", mat_rank(X.value))
-    print("Fixed point eigenvalues:")
-    print(np.linalg.eigvalsh(X.value))
+            n_iter += 1
+    print_iteration_info("fixed point", prob, X)
+    print("iterations: ", n_iter)
 
 
-# load a graph as a networkx Graph
-def load_graph(graph_file, n):
+# load n vertices of a toruspm graph as a networkx Graph
+def load_graph(graph_file, type, n=0, random=False):
     data_path = "../dat/"
+    with open(data_path + graph_file) as f:
+        if type == 0:
+            # toruspm
+            next(f, '')  # skip first line
+            G = nx.read_weighted_edgelist(f, nodetype=int, encoding="utf-8")
+        elif type == 1:
+            # matrix market
+            import scipy as sp
+            import scipy.io  # for mmread() and mmwrite()
+            G = nx.from_scipy_sparse_array(sp.io.mmread(f))
 
-    with open(data_path + graph_file) as inf:
-        next(inf, '')  # skip first line
-        G = nx.read_weighted_edgelist(inf, nodetype=int, encoding="utf-8")
-
-    first_vertex = np.floor(np.random.default_rng().random() * (len(G) - n - 1)).astype(int)
-    G = G.subgraph(range(first_vertex, first_vertex + n))
-    assert len(G) == n
-    nx.draw(G)
+    if n > 0:
+        if random:
+            first_vertex = np.floor(np.random.default_rng().random() * (len(G) - n - 1)).astype(int)
+            G = G.subgraph(list(G.nodes)[first_vertex:first_vertex + n])
+        else:
+            G = G.subgraph(list(G.nodes)[0:n])
+        assert len(G) == n
+    nx.draw(G, nx.circular_layout(G))
     return G
 
 

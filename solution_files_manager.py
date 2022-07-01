@@ -10,9 +10,9 @@ class SolutionFilesManager:
         else:
             self.solution_path = "%s/%s_%s_sol.npy" % (self.folder, case_name, solution_type)
 
-    def save_solution(self, cost, V, p_g, q_g):
+    def save_solution(self, cost, X, p_g=None, q_g=None):
         os.makedirs(self.folder, exist_ok=True)
-        np.save(self.solution_path, np.array([cost, V, p_g, q_g], dtype=object), allow_pickle=True)
+        np.save(self.solution_path, np.array([cost, X, p_g, q_g], dtype=object), allow_pickle=True)
 
     def load_solution(self):
         return np.load(self.solution_path, allow_pickle=True)

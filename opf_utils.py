@@ -1,4 +1,47 @@
 import numpy as np
+import pandas as pd
+import pandapower as pp
+import pandapower.networks as pn
+from pandapower.plotting import simple_plot
+
+
+def load_pp_network(case):
+    # net = custom_networks.get_case(case)
+    net = getattr(pn, case)()
+    n = len(net.bus)
+
+    simple_plot(net, plot_loads=True, plot_sgens=True)
+
+    # generators
+    gen_df_list = []
+    gen_class_list = ["ext_grid", "gen", "sgen"]  # the 3 types of generators
+    data_col_list = ["bus", "max_p_mw", "min_p_mw", "max_q_mvar", "min_q_mvar"]
+
+    for gen_class in gen_class_list:
+        if not net[gen_class].empty:
+            # get a table of cost coefficients only for the current type of generators
+            gen_class_poly_cost = net.poly_cost.loc[net.poly_cost.et == gen_class].set_index("element")
+            # get a table of cost coefficients and power bounds only for the current type of generators
+            gen_class_df = net[gen_class][data_col_list].join(gen_class_poly_cost)
+            gen_df_list.append(gen_class_df)
+
+    # combine tables for all types of generators
+    gen_df = pd.concat(gen_df_list).reset_index()
+    n_gen = len(gen_df)
+    gens = gen_df["bus"].to_numpy()
+
+    # loads
+    load_df = net.bus.join(net.load[["bus", "p_mw", "q_mvar"]].set_index("bus")).fillna(0)[["p_mw", "q_mvar"]]
+
+    # admittance
+    # compute line susceptance in p.u.
+    net.line['s_pu'] = net.line['c_nf_per_km'] * net.line["length_km"] * (2 * np.pi * net.f_hz) * \
+                       ((net.bus.loc[net.line.from_bus.values, "vn_kv"].values) ** 2) / net.sn_mva / net.line['parallel'] / 1e9
+    # obtain a NetworkX Graph from the network, with each edge containing p.u. impedance data
+    graph = pp.topology.create_nxgraph(net, multi=False, calc_branch_impedances=True, branch_impedance_unit="pu")
+    G_val, B_val, Y_val = compute_admittance_mat(net, graph)
+
+    return net, n, gen_df, n_gen, gens, load_df, graph, G_val, B_val, Y_val
 
 
 
@@ -59,6 +102,23 @@ def compute_admittance_mat(net, graph):
     Y_val = G_val + B_val * 1j
     return G_val, B_val, Y_val
 
+
+def recover_solution(X, proj_rank=1):
+    eigen_values, eigen_vectors = np.linalg.eigh(X)
+    eigen_values = np.real(eigen_values)
+    X_proj = eigen_vectors[:, -proj_rank:] @ np.diag(eigen_values[-proj_rank:]) @ eigen_vectors[:, -proj_rank:].conj().T
+    return X_proj
+
+
+def recover_verify_solution(prob, X, proj_rank=1):
+    X_tmp = X.value
+    X.value = recover_solution(X.value, proj_rank)
+    for c in prob.constraints:
+        print(c.violation())
+    X.value = X_tmp
+
+
+
 # compute power generation (p_d, q_d) given X = vv*
 def compute_generation(X, n_gen, p_d, q_d, G, B, graph):
     p_g = np.zeros(n_gen)
@@ -71,16 +131,15 @@ def compute_generation(X, n_gen, p_d, q_d, G, B, graph):
     return np.real(p_g), np.real(q_g)
 
 
-# given a solution v, compute the power generation and check if they lie in bounds
-def check_power_feasibility(v, p_min, p_max, q_min, q_max, n_gen, p_d, q_d, G, B, graph):
-    X = np.outer(v, v.conj())
+# given a solution X, compute the power generation and check if they lie in bounds
+def check_power_feasibility(X, p_min, p_max, q_min, q_max, gens, n_gen, p_d, q_d, G, B, graph):
     p_g, q_g = compute_generation(X, n_gen, p_d, q_d, G, B, graph)
     for i in range(n_gen):
         if p_g[i] < p_min[i]:
-            print("active power generation %d is too low: p_g = %f < %f" % (i, p_g[i], p_min[i]))
+            print("active power generation %d is too low: p_g = %f < %f" % (gens[i], p_g[i], p_min[i]))
         elif p_g[i] > p_max[i]:
-            print("active power generation %d is too high: p_g = %f > %f" % (i, p_g[i], p_max[i]))
+            print("active power generation %d is too high: p_g = %f > %f" % (gens[i], p_g[i], p_max[i]))
         if q_g[i] < q_min[i]:
-            print("reactive power generation %d is too low: q_g = %f < %f" % (i, q_g[i], q_min[i]))
+            print("reactive power generation %d is too low: q_g = %f < %f" % (gens[i], q_g[i], q_min[i]))
         elif q_g[i] > q_max[i]:
-            print("reactive power generation %d is too high: q_g = %f > %f" % (i, q_g[i], q_max[i]))
+            print("reactive power generation %d is too high: q_g = %f > %f" % (gens[i], q_g[i], q_max[i]))
