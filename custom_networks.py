@@ -3,7 +3,7 @@ import pandapower.networks as pn
 
 
 def get_case(case_name, case_type=None):
-    # case type is specified only for custom cases
+    # case type is specified only for custom cases. Otherwise, load MATPOWER cases from pandapower
     if case_type is not None:
         return globals()[case_name](case_type)
     else:

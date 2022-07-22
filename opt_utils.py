@@ -20,7 +20,9 @@ def normalize_rows(X):
 def proj_to_annulus(v, min_r, max_r):
     # find the closest point of each entry in the ring
     n = v.shape[0]
-    x = []
+    assert np.isscalar(min_r) or len(min_r) == n
+    assert np.isscalar(max_r) or len(max_r) == n
+    x = np.zeros(n)
     norms = np.linalg.norm(v, axis=1)
 
     for i in range(n):
@@ -35,9 +37,9 @@ def proj_to_annulus(v, min_r, max_r):
             x_i = v_i / norms[i] * max_r_i
         else:
             x_i = v_i
-        x += [x_i]
+        x[i] = [x_i]
 
-    return np.array(x)
+    return x
 
 
 # round each row of Y to 1 or -1, or project onto the annulus between min_r and max_r
@@ -63,7 +65,7 @@ def hyperplane_rounding(Y, cost, min_r=1, max_r=1, n_iter=100):
     return min_cost, best_x
 
 
-# round each row of Y to a complex number of unit modulus
+# round each row of Y to a complex number of unit modulus, or project onto the annulus between min_r and max_r
 def complex_hyperplane_rounding(Y, cost, min_r=1, max_r=1, n_iter=100):
     min_cost = np.Inf
     best_x = None
@@ -85,9 +87,46 @@ def complex_hyperplane_rounding(Y, cost, min_r=1, max_r=1, n_iter=100):
     return min_cost, best_x
 
 
+# remove the small eigenvalues (all eigenvalues less than tol) of a PSD matrix (so all negative eiganvalues will be
+# removed)
+def remove_small_eigenvalues(X, tol=1e-6):
+    eigen_val, eigen_vec = np.linalg.eigh(X)
+    eigen_val = np.real(eigen_val)
+    idx_to_keep = eigen_val > tol
+    return eigen_vec[:, idx_to_keep] @ np.diag(eigen_val[idx_to_keep]) @ eigen_vec[:, idx_to_keep].T
+
+
+# get the eigenvalues and eigenvectors of PSD X, removing the delta_rank smallest eigenvalues
+def eigh_proj(X, delta_rank):
+    assert X.shape[0] > delta_rank
+    eigen_val, eigen_vec = np.linalg.eigh(X)
+    eigen_val = np.real(eigen_val)
+    # sort by eigenvalues, from the largest to the smallest
+    idx = eigen_val.argsort()[::-1]
+    eigen_val = eigen_val[idx]
+    eigen_vec = eigen_vec[:, idx]
+    return eigen_val, eigen_vec
+
+
+# eigen-project PSD X to decrease its rank by delta_rank
+def eigen_proj(X, delta_rank):
+    assert X.shape[0] > delta_rank
+    current_rank = np.linalg.matrix_rank(X, tol=1e-9)
+    target_rank = current_rank - delta_rank
+    X_proj = X
+    new_rank = current_rank
+    if target_rank >= 1:
+        new_rank = target_rank
+        eigen_val, eigen_vec = eigh_proj(X, delta_rank)
+
+        X_proj = eigen_vec[:, range(new_rank)] @ np.diag(eigen_val[range(new_rank)]) @ eigen_vec[:, range(new_rank)].T
+    return X_proj, new_rank
+
+
 # approximately reduce rank of X = YY* by delta_rank via eigenprojection and row normalization
 # if can't be reduced anymore, return the original Y
-def elliptope_eigen_proj(Y, is_complex, delta_rank=1):
+def elliptope_eigen_proj(Y, delta_rank=1):
+    assert len(Y) > delta_rank
     X = np.outer(Y, Y.conj())
     current_rank = np.linalg.matrix_rank(X, tol=1e-9)
     target_rank = current_rank - delta_rank
@@ -95,26 +134,23 @@ def elliptope_eigen_proj(Y, is_complex, delta_rank=1):
     new_rank = current_rank
     if target_rank >= 1:
         new_rank = target_rank
-        eigen_values, eigen_vectors = np.linalg.eigh(X)
-        eigen_values = np.real(eigen_values)
-        if not is_complex:
-            eigen_vectors = np.real(eigen_vectors)
-        # sort by eigenvalues, from the largest to the smallest
-        idx = eigen_values.argsort()[::-1]
-        eigen_values = eigen_values[idx]
-        eigen_vectors = eigen_vectors[:, idx]
+        eigen_val, eigen_vec = eigh_proj(X, delta_rank)
 
-        Y_proj = eigen_vectors[:, range(new_rank)] @ np.diag(np.sqrt(eigen_values[range(new_rank)]))
+        Y_proj = eigen_vec[:, range(new_rank)] @ np.diag(np.sqrt(eigen_val[range(new_rank)]))
         Y_proj = normalize_rows(Y_proj)
     return Y_proj, new_rank
 
 
 # perform fixed point iteration on cvxpy variable X, where X is the optimal solution of prob
-def fixed_point_iteration(prob, X, shift, is_complex, verbose=False, solver=cp.MOSEK):
+def fixed_point_iteration(prob, X, shift, is_complex, returns_path=False, tol=1e-4, verbose=False, solver=cp.MOSEK):
     n = X.shape[0]
+    X_path = None
+    if returns_path:
+        X_path = []
+
     if is_complex:
         prev_X = cp.Parameter((n, n), hermitian=True, value=X.value)
-        iteration_obj = cp.real(cp.trace(X @ (prev_X + shift)))
+        iteration_obj = cp.real(cp.trace(X @ cp.real(prev_X + shift)))
     else:
         prev_X = cp.Parameter((n, n), symmetric=True, value=X.value)
         iteration_obj = cp.trace(X @ (prev_X + shift))
@@ -131,24 +167,30 @@ def fixed_point_iteration(prob, X, shift, is_complex, verbose=False, solver=cp.M
     print_iteration_info("initial", prob, X)
     while not terminate:
         iteration_prob.solve(solver=solver)
-        if np.linalg.norm(X.value - prev_X.value) < 1e-3:
+        n_iter += 1
+        if returns_path:
+            X_path.append(X.value)
+        if np.linalg.norm(X.value - prev_X.value) < tol:
             terminate = True
         else:
             print_iteration_info("current", prob, X, verbose)
             prev_X.value = X.value
-            n_iter += 1
     print_iteration_info("fixed point", prob, X)
     print("iterations: ", n_iter)
+    return np.array(X_path)
 
 
-# load n vertices of a toruspm graph as a networkx Graph
-def load_graph(graph_file, type, n=0, random=False):
-    data_path = "../dat/"
+# load n vertices of a graph as a networkx Graph
+# if n == 0, load the entire graph
+# if random == True, then first_node doesn't have any effect
+def load_graph(graph_file, type, n=0, first_node=0, random=False):
+    data_path = "dat/"
     with open(data_path + graph_file) as f:
         if type == 0:
             # toruspm
             next(f, '')  # skip first line
             G = nx.read_weighted_edgelist(f, nodetype=int, encoding="utf-8")
+            G = nx.convert_node_labels_to_integers(G)
         elif type == 1:
             # matrix market
             import scipy as sp
@@ -160,7 +202,7 @@ def load_graph(graph_file, type, n=0, random=False):
             first_vertex = np.floor(np.random.default_rng().random() * (len(G) - n - 1)).astype(int)
             G = G.subgraph(list(G.nodes)[first_vertex:first_vertex + n])
         else:
-            G = G.subgraph(list(G.nodes)[0:n])
+            G = G.subgraph(list(G.nodes)[first_node : (first_node + n)])
         assert len(G) == n
     nx.draw(G, nx.circular_layout(G))
     return G

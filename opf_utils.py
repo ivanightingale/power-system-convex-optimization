@@ -3,14 +3,16 @@ import pandas as pd
 import pandapower as pp
 import pandapower.networks as pn
 from pandapower.plotting import simple_plot
+import custom_networks
 
 
-def load_pp_network(case):
-    # net = custom_networks.get_case(case)
-    net = getattr(pn, case)()
+def load_pp_network(case, case_type=None):
+    net = custom_networks.get_case(case, case_type)
+    # net = getattr(pn, case)()
     n = len(net.bus)
 
-    simple_plot(net, plot_loads=True, plot_sgens=True)
+    if case_type is None:
+        simple_plot(net, plot_loads=True, plot_sgens=True)
 
     # generators
     gen_df_list = []
@@ -18,6 +20,7 @@ def load_pp_network(case):
     data_col_list = ["bus", "max_p_mw", "min_p_mw", "max_q_mvar", "min_q_mvar"]
 
     for gen_class in gen_class_list:
+        # TODO: only use rows where controllable == True
         if not net[gen_class].empty:
             # get a table of cost coefficients only for the current type of generators
             gen_class_poly_cost = net.poly_cost.loc[net.poly_cost.et == gen_class].set_index("element")
@@ -28,7 +31,7 @@ def load_pp_network(case):
     # combine tables for all types of generators
     gen_df = pd.concat(gen_df_list).reset_index()
     n_gen = len(gen_df)
-    gens = gen_df["bus"].to_numpy()
+    gens = gen_df["bus"].tolist()
 
     # loads
     load_df = net.bus.join(net.load[["bus", "p_mw", "q_mvar"]].set_index("bus")).fillna(0)[["p_mw", "q_mvar"]]

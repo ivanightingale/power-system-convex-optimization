@@ -11,6 +11,7 @@ class SolutionFilesManager:
             self.solution_path = "%s/%s_%s_sol.npy" % (self.folder, case_name, solution_type)
 
     def save_solution(self, cost, X, p_g=None, q_g=None):
+        # note that X can be either a matrix (VV^*) or a vector (V itself)
         os.makedirs(self.folder, exist_ok=True)
         np.save(self.solution_path, np.array([cost, X, p_g, q_g], dtype=object), allow_pickle=True)
 
